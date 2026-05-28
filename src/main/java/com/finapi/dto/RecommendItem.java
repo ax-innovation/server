@@ -17,6 +17,7 @@ public class RecommendItem {
     private String  benefit;
     private String  note;
     private String  applyUrl;
+    private Long    allocatedAmount;    // 포트폴리오 배분 금액 (원)
     private SavingSimResult savingSim;
     private LoanSimResult   loanSim;
 }
