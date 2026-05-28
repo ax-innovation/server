@@ -6,7 +6,7 @@ import lombok.Getter;
 @Getter
 @Builder
 public class SavingSimResult {
-    private String bankName;        // ← 추가
+    private String bankName;
     private long   totalDeposit;
     private long   baseInterest;
     private long   bestInterest;
@@ -14,4 +14,5 @@ public class SavingSimResult {
     private long   baseFinalAmount;
     private long   bestFinalAmount;
     private String rateTypeNm;
+    private String note;            // 청년도약계좌 부분납입 안내 문구
 }

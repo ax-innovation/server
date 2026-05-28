@@ -8,7 +8,7 @@ import java.util.Map;
 public class RecommendRequest {
     private int          age;
     private long         annualIncome;
-    private long         monthlyDeposit;     // 총 월 납입 가능 금액
+    private long         monthlyDeposit;
     private int          termMonths;
     private long         loanAmount;
     private int          loanTermMonths;
@@ -16,9 +16,10 @@ public class RecommendRequest {
     private List<String> productTypes;
     private String       preferredBank;
 
-    // 포트폴리오 배분 금액
-    // key: 상품 유형 (예: "청년도약계좌", "적금", "정기예금")
-    // value: 배분 금액 (원)
-    // 예: {"청년도약계좌": 700000, "적금": 300000}
-    private Map<String, Long> allocation;
+    // 포트폴리오 모드
+    private boolean            portfolioMode;  // true: 포트폴리오 / false: 일반
+    private Map<String, Long>  allocation;     // 상품별 배분 금액
+    // 포트폴리오 2단계: 사용자가 선택한 상품 코드
+    // key: 상품 유형 / value: fin_prdt_cd (시중 상품) 또는 은행명 (청년도약계좌)
+    private Map<String, String> selectedProducts;
 }
