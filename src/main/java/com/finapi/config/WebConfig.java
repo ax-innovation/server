@@ -10,7 +10,7 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
-                .allowedOrigins("https://내-vercel-도메인.vercel.app") // Vercel 주소 허용
+                .allowedOrigins("https://ax-innovation-frontend.vercel.app") // Vercel 주소 허용
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
     }
 }
