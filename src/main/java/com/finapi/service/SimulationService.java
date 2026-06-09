@@ -1,12 +1,13 @@
 package com.finapi.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.finapi.dto.*;
 import com.finapi.entity.GovProduct;
 import com.finapi.repository.GovProductRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -31,42 +32,57 @@ public class SimulationService {
         long bestInterest = calcSavingInterest(monthly, bestRate, months, rateType);
 
         return SavingSimResult.builder()
-                .totalDeposit(totalDeposit)
-                .baseInterest(baseInterest)
-                .bestInterest(bestInterest)
-                .govContribution(0L)
-                .baseFinalAmount(totalDeposit + baseInterest)
-                .bestFinalAmount(totalDeposit + bestInterest)
-                .rateTypeNm("M".equals(rateType) ? "월복리" : "단리")
-                .build();
+            .totalDeposit(totalDeposit)
+            .baseInterest(baseInterest)
+            .bestInterest(bestInterest)
+            .govContribution(0L)
+            .baseFinalAmount(totalDeposit + baseInterest)
+            .bestFinalAmount(totalDeposit + bestInterest)
+            .rateTypeNm("M".equals(rateType) ? "월복리" : "단리")
+            .build();
     }
 
-    // ── 청년도약계좌 시뮬레이션 (은행별) ─────────────────────
-
+    /**
+     * 청년도약계좌 시뮬레이션
+     *
+     * 사용자가 선택한 기간(payMonths)만큼 납입 후 만기(60개월)까지 유지하는 방식
+     *
+     * 이자 계산:
+     *   1개월차 납입금 → (60 - 0)개월 이자
+     *   2개월차 납입금 → (60 - 1)개월 이자
+     *   ...
+     *   n개월차 납입금 → (60 - n + 1)개월 이자
+     *
+     * 정부기여금은 실제 납입한 payMonths 개월치만 지급
+     */
     public List<SavingSimResult> simulateYouthLeapByBank(
-            long monthly, long annualIncome, String preferredBank) {
+            long monthly, long annualIncome, String preferredBank, int payMonths) {
 
         GovProduct product = govRepo
-                .findByProductId("static_youth_leap_account")
-                .orElseThrow();
+            .findByProductId("static_youth_leap_account")
+            .orElseThrow();
 
         Map<String, Map<String, Double>> ratesByBank = parseRatesByBank(product.getExtraJson());
         List<SavingSimResult> results = new ArrayList<>();
+
+        int termMonths = 60; // 만기는 항상 60개월 고정
+        int actualPayMonths = Math.min(payMonths, termMonths); // 납입 기간 (최대 60개월)
 
         if (preferredBank != null && !preferredBank.isEmpty()) {
             Map<String, Double> rates = ratesByBank.get(preferredBank);
             if (rates != null) {
                 results.add(calcYouthLeap(monthly, annualIncome,
-                        rates.get("base"), rates.get("best"), preferredBank));
+                    rates.get("base"), rates.get("best"),
+                    preferredBank, actualPayMonths, termMonths));
             }
             return results;
         }
 
         for (Map.Entry<String, Map<String, Double>> entry : ratesByBank.entrySet()) {
             results.add(calcYouthLeap(monthly, annualIncome,
-                    entry.getValue().get("base"),
-                    entry.getValue().get("best"),
-                    entry.getKey()));
+                entry.getValue().get("base"),
+                entry.getValue().get("best"),
+                entry.getKey(), actualPayMonths, termMonths));
         }
 
         results.sort(Comparator.comparingLong(SavingSimResult::getBestFinalAmount).reversed());
@@ -75,43 +91,51 @@ public class SimulationService {
 
     private SavingSimResult calcYouthLeap(
             long monthly, long annualIncome,
-            double baseRate, double bestRate, String bankName) {
+            double baseRate, double bestRate,
+            String bankName, int payMonths, int termMonths) {
 
-        int  months       = 60;
         long capped       = Math.min(monthly, 700_000L);
         long monthlyGov   = calcMonthlyGov(annualIncome, capped);
-        long totalGov     = monthlyGov * months;
-        long totalDeposit = capped * months;
-        long baseInterest = calcSavingInterest(capped, baseRate, months, "S");
-        long bestInterest = calcSavingInterest(capped, bestRate, months, "S");
+        long totalGov     = monthlyGov * payMonths;  // 납입한 기간만큼만 정부기여금
+        long totalDeposit = capped * payMonths;
+
+        // 월별 납입금에 대해 각각 다른 기간의 이자 계산
+        // n번째 납입금은 (termMonths - n + 1)개월 동안 이자 적용
+        long baseInterest = calcPartialPayInterest(capped, baseRate, payMonths, termMonths);
+        long bestInterest = calcPartialPayInterest(capped, bestRate, payMonths, termMonths);
+
+        boolean isPartial = payMonths < termMonths;
+        String noteText = isPartial
+            ? String.format("%d개월 납입 후 만기(%d개월)까지 유지 기준", payMonths, termMonths)
+            : "60개월 전액 납입 기준";
 
         return SavingSimResult.builder()
-                .bankName(bankName)
-                .totalDeposit(totalDeposit)
-                .baseInterest(baseInterest)
-                .bestInterest(bestInterest)
-                .govContribution(totalGov)
-                .baseFinalAmount(totalDeposit + baseInterest + totalGov)
-                .bestFinalAmount(totalDeposit + bestInterest + totalGov)
-                .rateTypeNm("단리")
-                .build();
+            .bankName(bankName)
+            .totalDeposit(totalDeposit)
+            .baseInterest(baseInterest)
+            .bestInterest(bestInterest)
+            .govContribution(totalGov)
+            .baseFinalAmount(totalDeposit + baseInterest + totalGov)
+            .bestFinalAmount(totalDeposit + bestInterest + totalGov)
+            .rateTypeNm("단리")
+            .note(noteText)
+            .build();
     }
 
-    private Map<String, Map<String, Double>> parseRatesByBank(String extraJson) {
-        try {
-            JsonNode root  = objectMapper.readTree(extraJson);
-            JsonNode rates = root.get("rates_by_bank");
-            Map<String, Map<String, Double>> result = new LinkedHashMap<>();
-            rates.fields().forEachRemaining(entry -> {
-                Map<String, Double> bankRates = new LinkedHashMap<>();
-                bankRates.put("base", entry.getValue().get("base").asDouble());
-                bankRates.put("best", entry.getValue().get("best").asDouble());
-                result.put(entry.getKey(), bankRates);
-            });
-            return result;
-        } catch (Exception e) {
-            return Map.of("기본", Map.of("base", 4.5, "best", 6.0));
+    /**
+     * 부분 납입 이자 계산 (단리)
+     * n번째 납입금은 (termMonths - n + 1)개월치 이자 적용
+     */
+    private long calcPartialPayInterest(
+            long monthly, double annualRate, int payMonths, int termMonths) {
+
+        double r = annualRate / 100.0 / 12.0;
+        long totalInterest = 0;
+        for (int n = 1; n <= payMonths; n++) {
+            int remainingMonths = termMonths - n + 1;
+            totalInterest += Math.round(monthly * r * remainingMonths);
         }
+        return totalInterest;
     }
 
     // ── 대출 시뮬레이션 ───────────────────────────────────────
@@ -121,27 +145,27 @@ public class SimulationService {
         LoanCalc maxCalc = calcLoan(loanAmount, maxRate, months);
 
         return LoanSimResult.builder()
-                .loanAmount(loanAmount)
-                .termMonths(months)
-                .minRate(minRate).maxRate(maxRate)
-                .monthlyPaymentMin(minCalc.monthlyPayment)
-                .totalInterestMin(minCalc.totalInterest)
-                .totalPaymentMin(minCalc.totalPayment)
-                .monthlyPaymentMax(maxCalc.monthlyPayment)
-                .totalInterestMax(maxCalc.totalInterest)
-                .totalPaymentMax(maxCalc.totalPayment)
-                .schedule(buildSchedule(loanAmount, minRate, months))
-                .build();
+            .loanAmount(loanAmount)
+            .termMonths(months)
+            .minRate(minRate).maxRate(maxRate)
+            .monthlyPaymentMin(minCalc.monthlyPayment)
+            .totalInterestMin(minCalc.totalInterest)
+            .totalPaymentMin(minCalc.totalPayment)
+            .monthlyPaymentMax(maxCalc.monthlyPayment)
+            .totalInterestMax(maxCalc.totalInterest)
+            .totalPaymentMax(maxCalc.totalPayment)
+            .schedule(buildSchedule(loanAmount, minRate, months))
+            .build();
     }
 
     private List<MonthlySchedule> buildSchedule(long principal, double annualRate, int months) {
         double r          = annualRate / 100.0 / 12.0;
         double monthlyPmt = r == 0
-                ? (double) principal / months
-                : principal * r * Math.pow(1 + r, months) / (Math.pow(1 + r, months) - 1);
+            ? (double) principal / months
+            : principal * r * Math.pow(1 + r, months) / (Math.pow(1 + r, months) - 1);
 
         List<MonthlySchedule> result = new ArrayList<>();
-        long remaining = principal;
+        long remaining  = principal;
         int  totalYears = (int) Math.ceil(months / 12.0);
 
         for (int year = 1; year <= totalYears; year++) {
@@ -160,11 +184,11 @@ public class SimulationService {
             }
 
             result.add(MonthlySchedule.builder()
-                    .year(year)
-                    .principalPaid(yearlyPrincipal)
-                    .interestPaid(yearlyInterest)
-                    .remainingBalance(remaining)
-                    .build());
+                .year(year)
+                .principalPaid(yearlyPrincipal)
+                .interestPaid(yearlyInterest)
+                .remainingBalance(remaining)
+                .build());
         }
         return result;
     }
@@ -214,5 +238,22 @@ public class SimulationService {
         else if (income <= 48_000_000) return 600_000L;
         else if (income <= 60_000_000) return 700_000L;
         return 0L;
+    }
+
+    private Map<String, Map<String, Double>> parseRatesByBank(String extraJson) {
+        try {
+            JsonNode root  = objectMapper.readTree(extraJson);
+            JsonNode rates = root.get("rates_by_bank");
+            Map<String, Map<String, Double>> result = new LinkedHashMap<>();
+            rates.fields().forEachRemaining(entry -> {
+                Map<String, Double> bankRates = new LinkedHashMap<>();
+                bankRates.put("base", entry.getValue().get("base").asDouble());
+                bankRates.put("best", entry.getValue().get("best").asDouble());
+                result.put(entry.getKey(), bankRates);
+            });
+            return result;
+        } catch (Exception e) {
+            return Map.of("기본", Map.of("base", 4.5, "best", 6.0));
+        }
     }
 }
